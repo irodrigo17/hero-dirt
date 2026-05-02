@@ -6,7 +6,8 @@ A single-page web app for tracking rainfall to help mountain bikers find perfect
 
 - **Place search** -- Find any location using the search bar (powered by Photon/Komoot geocoding with proximity bias). Press Enter/Search for a full-screen results page with infinite scroll.
 - **Click-to-inspect** -- Click anywhere on the map to get rainfall data for that point, with reverse geocoding to show the place name.
-- **Saved places** -- Save locations to a persistent list in the sidebar. Each card shows accumulated rainfall at a glance. Saved places are stored in `localStorage` and survive page reloads. On iOS, add to Home Screen for durable persistent storage.
+- **User accounts** -- Sign in with email magic link (powered by Supabase Auth). Saved places sync to the cloud and are accessible across devices.
+- **Saved places** -- Save locations to a persistent list in the sidebar. Each card shows accumulated rainfall at a glance. When signed in, places sync to Supabase; when signed out, falls back to `localStorage`.
 - **Custom names** -- Rename saved places with inline editing for quick identification.
 - **Rainfall summary** -- For each location, see total precipitation over the last 1, 2, 3, and 7 days, plus how many days since the last rain.
 - **Rainfall overlay** -- A color-coded heatmap rendered on the map showing precipitation intensity across the visible area. Includes a time period picker (1d/2d/3d/7d), opacity slider, and legend.
@@ -16,21 +17,23 @@ A single-page web app for tracking rainfall to help mountain bikers find perfect
 
 ## Architecture
 
-The app has no build step, no bundler, and no framework. HTML, CSS, and JavaScript are all inline in `index.html`, with a PWA manifest (`manifest.json`), service worker (`sw.js`), and icon (`icon.svg`) alongside it.
+The app has no build step, no bundler, and no framework. HTML, CSS, and JavaScript are all inline in `index.html`, with a PWA manifest (`manifest.json`), service worker (`sw.js`), icon (`icon.svg`), and database schema (`supabase-schema.sql`) alongside it.
 
 ### External dependencies (loaded via CDN)
 
 | Library | Purpose |
 |---------|---------|
 | [Leaflet](https://leafletjs.com/) | Interactive map rendering and layer management |
+| [Supabase JS](https://supabase.com/docs/reference/javascript) | Auth and database client |
 
-### APIs used (all free, no API keys required)
+### APIs and services
 
 | API | Purpose |
 |-----|---------|
-| [Open-Meteo](https://open-meteo.com/) | Daily precipitation data. Used for both per-location rainfall summaries and the batch grid queries that power the map overlay. |
-| [Photon](https://photon.komoot.io/) | Forward geocoding (place search) with proximity bias. Powered by Komoot, based on OpenStreetMap data. |
-| [Nominatim](https://nominatim.openstreetmap.org/) | Reverse geocoding (click-to-name). Provided by OpenStreetMap. |
+| [Supabase](https://supabase.com/) | User authentication (email magic link) and PostgreSQL database for saved places. Free tier. |
+| [Open-Meteo](https://open-meteo.com/) | Daily precipitation data. Used for both per-location rainfall summaries and the batch grid queries that power the map overlay. Free, no key required. |
+| [Photon](https://photon.komoot.io/) | Forward geocoding (place search) with proximity bias. Powered by Komoot, based on OpenStreetMap data. Free, no key required. |
+| [Nominatim](https://nominatim.openstreetmap.org/) | Reverse geocoding (click-to-name). Provided by OpenStreetMap. Free, no key required. |
 | [CARTO Voyager](https://carto.com/) | Base map tile layer. |
 | [ipapi.co](https://ipapi.co/) | IP-based geolocation for initial map centering. |
 
@@ -66,21 +69,40 @@ User interaction (search / click / pan)
    └── Overlay: interpolated heatmap canvas
         |
         v
-  localStorage  ──>  Persisted saved places (name, coords, cached data)
+  Supabase      ──>  Cloud-synced saved places (when signed in)
+  localStorage  ──>  Offline fallback (when signed out)
 ```
 
 ## Running locally
 
-Open `index.html` in a browser. No server required.
+Serve via a local HTTP server (required for Supabase auth and CORS):
+
+```
+python3 -m http.server 8000
+```
+
+Then open `http://localhost:8000`.
 
 ## Deploying
 
-This is a static site (4 files). Deploy to any static hosting provider:
+This is a static site (5 files). Deploy to any static hosting provider:
 
 - [Netlify Drop](https://app.netlify.com/drop) -- drag and drop, live in seconds
 - [GitHub Pages](https://pages.github.com/) -- push to a repo, enable Pages
 - [Cloudflare Pages](https://pages.cloudflare.com/) -- connect a repo or direct upload
 - [Vercel](https://vercel.com/) -- connect a repo or `npx vercel`
+
+## Supabase Setup
+
+The app uses [Supabase](https://supabase.com/) for user accounts and cloud sync. To set up your own instance:
+
+1. Create a project at [supabase.com](https://supabase.com/)
+2. Run `supabase-schema.sql` in the SQL Editor to create the `places` table with Row Level Security
+3. Grant table access: `GRANT SELECT, INSERT, UPDATE, DELETE ON public.places TO authenticated;`
+4. Go to Authentication > URL Configuration and set the Site URL to your app's URL
+5. Update `SUPABASE_URL` and `SUPABASE_ANON_KEY` in `index.html` with your project's credentials
+
+The app works without Supabase configured -- it falls back to localStorage for saved places.
 
 ## License
 
