@@ -1,6 +1,6 @@
-# RainClaude
+# Hero Dirt
 
-A single-page web app for tracking accumulated rainfall anywhere on the map. Search for places, save your favorites, and visualize precipitation with an interactive color-coded overlay.
+A single-page web app for tracking rainfall to help mountain bikers find perfect trail conditions. Search for places, save your favorite trails, and visualize precipitation with an interactive color-coded overlay.
 
 ## Features
 

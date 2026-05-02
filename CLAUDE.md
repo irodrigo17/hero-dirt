@@ -1,6 +1,6 @@
-# RainClaude
+# Hero Dirt
 
-A single-page web app for tracking accumulated rainfall anywhere on the map.
+A single-page web app for tracking rainfall to help mountain bikers find perfect trail conditions.
 
 ## Project Structure
 
