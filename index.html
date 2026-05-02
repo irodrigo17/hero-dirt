@@ -11,6 +11,7 @@
     <link rel="icon" href="icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="icon.svg">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -676,6 +677,112 @@
         }
         .sp-spinner { display: inline-block; width: 18px; height: 18px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: sp-spin 0.6s linear infinite; vertical-align: middle; margin-right: 8px; }
         @keyframes sp-spin { to { transform: rotate(360deg); } }
+
+        /* Auth */
+        .auth-btn {
+            background: none;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 6px 14px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            color: var(--accent);
+            white-space: nowrap;
+            transition: background 0.15s, border-color 0.15s;
+        }
+        .auth-btn:hover { background: #f0f4ff; border-color: var(--accent); }
+
+        .auth-user {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            white-space: nowrap;
+        }
+        .auth-user .auth-email {
+            color: var(--text-sec);
+            max-width: 140px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .auth-modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.4);
+            z-index: 3000;
+            justify-content: center;
+            align-items: center;
+        }
+        .auth-modal-overlay.active { display: flex; }
+
+        .auth-modal {
+            background: var(--card-bg);
+            border-radius: 14px;
+            padding: 28px 24px;
+            width: 340px;
+            max-width: 90vw;
+            box-shadow: 0 8px 30px rgba(0,0,0,0.2);
+        }
+
+        .auth-modal h2 {
+            font-size: 18px;
+            margin-bottom: 4px;
+        }
+
+        .auth-modal p {
+            font-size: 13px;
+            color: var(--text-sec);
+            margin-bottom: 18px;
+        }
+
+        .auth-modal input {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            font-size: 14px;
+            outline: none;
+            margin-bottom: 12px;
+        }
+
+        .auth-modal input:focus { border-color: var(--accent); }
+
+        .auth-modal .auth-submit {
+            width: 100%;
+            padding: 10px;
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .auth-modal .auth-submit:hover { background: var(--accent-hover); }
+        .auth-modal .auth-submit:disabled { opacity: 0.6; cursor: default; }
+
+        .auth-msg {
+            font-size: 12px;
+            margin-top: 10px;
+            text-align: center;
+        }
+        .auth-msg.error { color: #ef4444; }
+        .auth-msg.success { color: #16a34a; }
+
+        .auth-close {
+            float: right;
+            background: none;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+            color: var(--text-sec);
+            line-height: 1;
+            padding: 0 4px;
+        }
     </style>
 </head>
 <body>
@@ -686,7 +793,22 @@
             <input type="search" id="search-input" placeholder="Search for a place..." autocomplete="off" enterkeyhint="search" />
             <div class="search-results" id="search-results"></div>
         </div>
+        <div id="auth-area">
+            <button class="auth-btn" id="auth-login-btn">Sign in</button>
+        </div>
     </header>
+
+    <div class="auth-modal-overlay" id="auth-modal-overlay">
+        <div class="auth-modal">
+            <button class="auth-close" id="auth-close">&times;</button>
+            <h2>Sign in</h2>
+            <p>Enter your email to receive a magic link.</p>
+            <input type="email" id="auth-email" placeholder="you@example.com" autocomplete="email" />
+            <button class="auth-submit" id="auth-submit">Send magic link</button>
+            <div class="auth-msg" id="auth-msg"></div>
+        </div>
+    </div>
+
     <main>
         <div class="sidebar" id="sidebar">
             <div class="sidebar-head">
@@ -758,26 +880,50 @@
     (function () {
         'use strict';
 
+        // --- Supabase Config ---
+        const SUPABASE_URL = 'https://akjvogyvfegyriirouuw.supabase.co';
+        const SUPABASE_ANON_KEY = 'sb_publishable_XLfkdAiZ89B7gC-yI4gBoQ_10zt1U0j';
+
+        let supabase = null;
+        try {
+            supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+                auth: {
+                    flowType: 'implicit',
+                    detectSessionInUrl: true,
+                    persistSession: true,
+                    storage: window.localStorage,
+                    lock: async function (_name, _acquireTimeout, fn) {
+                        return await fn();
+                    }
+                }
+            });
+        } catch (e) {
+            console.error('Supabase init error:', e);
+        }
+
+        let currentUser = null;
+
         // --- State ---
         const STORE_KEY = 'rain-tracker-places';
         let savedPlaces = [];
         let map, markers = [];
-        let popupCtx = null; // current popup context: { lat, lon, name, rainfall }
+        let popupCtx = null;
 
         try {
             savedPlaces = JSON.parse(localStorage.getItem(STORE_KEY) || '[]');
         } catch { savedPlaces = []; }
 
         // --- Boot ---
-        function init() {
+        async function init() {
             initMap();
             renderList();
             updateMarkers();
-            refreshAll();
             setupSearch();
             setupSearchPage();
             setupEvents();
             initOverlay();
+            initAuth();
+            refreshAll();
         }
 
         // --- Map ---
@@ -1122,7 +1268,7 @@
         }
 
         // --- Saved Places ---
-        function persist() {
+        function persistLocal() {
             try { localStorage.setItem(STORE_KEY, JSON.stringify(savedPlaces)); } catch {}
         }
 
@@ -1132,17 +1278,21 @@
 
         function savePlace(lat, lon, name, rainfall) {
             if (isPlaceSaved(lat, lon)) return;
-            savedPlaces.unshift({ lat: lat, lon: lon, name: name, rainfall: rainfall });
-            persist();
+            var place = { lat: lat, lon: lon, name: name, rainfall: rainfall };
+            savedPlaces.unshift(place);
+            persistLocal();
             renderList();
             updateMarkers();
+            syncSavePlace(place);
         }
 
         function removePlace(idx) {
+            var place = savedPlaces[idx];
             savedPlaces.splice(idx, 1);
-            persist();
+            persistLocal();
             renderList();
             updateMarkers();
+            if (place) syncRemovePlace(place);
         }
 
         function focusPlace(idx) {
@@ -1161,7 +1311,7 @@
             var rainfall = await fetchRainfall(p.lat, p.lon);
             if (rainfall) {
                 savedPlaces[idx].rainfall = rainfall;
-                persist();
+                persistLocal();
                 renderList();
                 updateMarkers();
             }
@@ -1254,9 +1404,10 @@
                 } else {
                     delete savedPlaces[idx].customName;
                 }
-                persist();
+                persistLocal();
                 renderList();
                 updateMarkers();
+                syncRenamePlace(savedPlaces[idx]);
             }
 
             input.addEventListener('keydown', function (e) {
@@ -1518,6 +1669,142 @@
 
             if (ovLayer) map.removeLayer(ovLayer);
             ovLayer = newLayer;
+        }
+
+        // --- Auth ---
+        async function initAuth() {
+            if (!supabase) return;
+
+            supabase.auth.onAuthStateChange(function (_event, session) {
+                currentUser = session?.user || null;
+                renderAuthArea();
+                if (currentUser) {
+                    setTimeout(function () { loadPlacesFromSupabase(); }, 0);
+                }
+            });
+
+            var { data: { session } } = await supabase.auth.getSession();
+            currentUser = session?.user || null;
+            accessToken = session?.access_token || null;
+            renderAuthArea();
+            if (currentUser) {
+                await loadPlacesFromSupabase();
+            }
+
+            document.getElementById('auth-close').addEventListener('click', function () {
+                document.getElementById('auth-modal-overlay').classList.remove('active');
+                document.getElementById('auth-msg').textContent = '';
+            });
+
+            document.getElementById('auth-modal-overlay').addEventListener('click', function (e) {
+                if (e.target === this) {
+                    this.classList.remove('active');
+                    document.getElementById('auth-msg').textContent = '';
+                }
+            });
+
+            document.getElementById('auth-submit').addEventListener('click', sendMagicLink);
+            document.getElementById('auth-email').addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') sendMagicLink();
+            });
+        }
+
+        async function sendMagicLink() {
+            var email = document.getElementById('auth-email').value.trim();
+            var msgEl = document.getElementById('auth-msg');
+            var btn = document.getElementById('auth-submit');
+            if (!email) { msgEl.className = 'auth-msg error'; msgEl.textContent = 'Enter an email'; return; }
+
+            btn.disabled = true;
+            msgEl.className = 'auth-msg';
+            msgEl.textContent = 'Sending...';
+
+            var { error } = await supabase.auth.signInWithOtp({ email: email });
+            btn.disabled = false;
+
+            if (error) {
+                msgEl.className = 'auth-msg error';
+                msgEl.textContent = error.message;
+            } else {
+                msgEl.className = 'auth-msg success';
+                msgEl.textContent = 'Check your email for the login link!';
+            }
+        }
+
+        function renderAuthArea() {
+            var area = document.getElementById('auth-area');
+            if (!supabase) { area.style.display = 'none'; return; }
+
+            if (currentUser) {
+                area.innerHTML = '<div class="auth-user">'
+                    + '<span class="auth-email">' + esc(currentUser.email) + '</span>'
+                    + '<button class="auth-btn" id="auth-logout-btn">Sign out</button>'
+                    + '</div>';
+                document.getElementById('auth-logout-btn').addEventListener('click', async function () {
+                    await supabase.auth.signOut();
+                    currentUser = null;
+                    renderAuthArea();
+                    savedPlaces = [];
+                    try { savedPlaces = JSON.parse(localStorage.getItem(STORE_KEY) || '[]'); } catch {}
+                    renderList();
+                    updateMarkers();
+                });
+            } else {
+                area.innerHTML = '<button class="auth-btn" id="auth-login-btn">Sign in</button>';
+                document.getElementById('auth-login-btn').addEventListener('click', function () {
+                    document.getElementById('auth-modal-overlay').classList.add('active');
+                    document.getElementById('auth-email').focus();
+                });
+            }
+        }
+
+        // --- Supabase Data Sync ---
+        async function loadPlacesFromSupabase() {
+            if (!supabase || !currentUser) return;
+            var { data, error } = await supabase
+                .from('places')
+                .select('*')
+                .order('created_at', { ascending: false });
+
+            if (error) { console.error('Load places error:', error); return; }
+
+            savedPlaces = data.map(function (row) {
+                return { id: row.id, lat: row.lat, lon: row.lon, name: row.name, customName: row.custom_name, rainfall: null };
+            });
+            persistLocal();
+            renderList();
+            updateMarkers();
+            refreshAll();
+        }
+
+        async function syncSavePlace(place) {
+            if (!supabase || !currentUser) return;
+            var { data, error } = await supabase.from('places').insert({
+                user_id: currentUser.id,
+                lat: place.lat,
+                lon: place.lon,
+                name: place.name,
+                custom_name: place.customName || null
+            }).select();
+
+            if (error) { console.error('Save place error:', error); return; }
+            if (data && data[0]) {
+                var idx = savedPlaces.findIndex(function (p) { return p.lat === place.lat && p.lon === place.lon; });
+                if (idx >= 0) savedPlaces[idx].id = data[0].id;
+                persistLocal();
+            }
+        }
+
+        async function syncRemovePlace(place) {
+            if (!supabase || !currentUser || !place.id) return;
+            var { error } = await supabase.from('places').delete().eq('id', place.id);
+            if (error) console.error('Remove place error:', error);
+        }
+
+        async function syncRenamePlace(place) {
+            if (!supabase || !currentUser || !place.id) return;
+            var { error } = await supabase.from('places').update({ custom_name: place.customName || null }).eq('id', place.id);
+            if (error) console.error('Rename place error:', error);
         }
 
         // --- Service Worker ---
